@@ -24,7 +24,23 @@ EXCLUDE_WORDS = [
     'монтажный лист',
 ]
 
-JUNK_PHRASES = ['обрыв', 'таймкод сбит']
+JUNK_PHRASES = [
+    'обрыв',
+    'таймкод сбит',
+    'техническая пауза',
+    'черный фон',
+    'чёрный фон',
+    'стоп-кадр',
+    'стоп кадр',
+    'тип плана',
+    'содержание (описание) плана',
+    'титры',
+    'монолог',
+    'разговор',
+    'песни',
+    'субтитры',
+    'музыка',
+]
 TECH_PREFIXES = ['НОМЕР', 'ТАЙМК', 'НАЧАЛ', 'КОНЕЦ', 'TIME']
 
 TIME_PATTERN = re.compile(r'\b\d{1,2}[:.]\d{2}[:.]\d{2}\b')
@@ -94,11 +110,12 @@ def convert_doc_to_docx(path: Path) -> Path:
 
 
 def parse_docx_tables(path: Path):
-    """Return date and list of descriptions from all tables.
+    """Return the first date and a combined description from all tables.
 
-    Multi-line text is preserved. Rows that start with empty leading cells are
-    considered a continuation of the previous description and appended with a
-    newline.
+    Multi-line text is preserved. Rows starting with empty leading cells are
+    treated as continuations of the previous description. Technical or
+    repetitive lines are removed. All descriptions are joined with a newline so
+    that one document yields a single block of text.
     """
     from docx import Document  # imported here to avoid dependency when unused
     from docx.oxml.table import CT_Tbl
@@ -109,6 +126,7 @@ def parse_docx_tables(path: Path):
     doc = Document(str(path))
     date = None
     records: list[str] = []
+    unique_lines: set[str] = set()
 
     for element in doc.element.body.iterchildren():
         if isinstance(element, CT_P) and date is None:
@@ -134,12 +152,20 @@ def parse_docx_tables(path: Path):
                 if not desc_parts:
                     continue
                 desc = ' '.join(desc_parts).strip()
+                if not desc:
+                    continue
+                line_lower = desc.lower()
+                if any(ph in line_lower for ph in JUNK_PHRASES):
+                    continue
                 if is_cont and records:
                     records[-1] += "\n" + desc
                 else:
-                    records.append(desc)
+                    if desc not in unique_lines:
+                        records.append(desc)
+                        unique_lines.add(desc)
 
-    return date, records
+    combined = "\n".join(records).strip()
+    return date, combined
 
 
 def write_csv(path: Path, rows):
@@ -184,13 +210,12 @@ def process_documents(input_dir: Path, output_csv: Path, limit: int = 500):
             target = file
             if file.suffix.lower() == '.doc':
                 target = convert_doc_to_docx(file)
-            date, descriptions = parse_docx_tables(target)
-            if not descriptions:
+            date, description = parse_docx_tables(target)
+            if not description:
                 continue
             processed += 1
-            row_count += len(descriptions)
-            rows = [(source_id, date or '', desc) for desc in descriptions]
-            write_csv(output_csv, rows)
+            row_count += 1
+            write_csv(output_csv, [(source_id, date or '', description)])
             seen_ids.add(source_id)
             log_lines.append(f'Processed {file.name}')
         except Exception as exc:  # pragma: no cover - execution errors

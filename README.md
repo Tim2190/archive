@@ -12,14 +12,13 @@ Utility to extract episode tables from Word documents into a single CSV file.
    python extract_word.py /path/to/folder -o result.csv
    ```
 
-Each run processes up to 500 files (configurable with `--limit`) and appends
-rows to the CSV. All tables are scanned and every non-empty row becomes a
-record. If a row starts with empty leading cells it is treated as a continuation
-of the previous description and appended to it with a newline. Multi-line text
-inside description cells is preserved. If several files share the same
-`source_id`, only the first one is written to the result. The resulting CSV has
-three columns: `source_id`, `date` and `description`. A log file `process.log`
-lists processed files and any errors.
+Each run processes up to 500 files (configurable with `--limit`) and appends a
+single line per document. All meaningful rows from tables are merged into one
+`description` field. Continuation rows and multi-line cells are joined with
+newlines and repetitive technical phrases are removed. If several files share
+the same `source_id`, only the first one is written to the result. The resulting
+CSV has three columns: `source_id`, `date` and `description`. A log file
+`process.log` lists processed files and any errors.
 
 ### Web interface
 
