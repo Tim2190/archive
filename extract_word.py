@@ -15,7 +15,6 @@ TRANSLIT_MAP = {
     'Д': 'D',
     'Ф': 'F',
     'Н': 'H',
-    'В': 'V',
 }
 
 EXCLUDE_WORDS = [
@@ -30,6 +29,11 @@ TECH_PREFIXES = ['НОМЕР', 'ТАЙМК', 'НАЧАЛ', 'КОНЕЦ', 'TIME']
 
 TIME_PATTERN = re.compile(r'\b\d{1,2}[:.]\d{2}[:.]\d{2}\b')
 DATE_PATTERN = re.compile(r'\b\d{1,2}[./]\d{1,2}[./]\d{4}\b')
+
+
+def format_description(text: str) -> str:
+    """Return text with each sentence on a new line."""
+    return re.sub(r'(?<=[.!?])\s+', '\n', text).strip()
 
 
 def normalize_source_id(filename: str) -> str:
@@ -63,6 +67,9 @@ def normalize_source_id(filename: str) -> str:
 
     for cyr, lat in TRANSLIT_MAP.items():
         letters = letters.replace(cyr, lat)
+
+    if letters.startswith('В'):
+        letters = 'B' + letters[1:]
 
     letters = letters.strip('-')
     digits = digits.strip('-')
@@ -123,7 +130,7 @@ def parse_docx_tables(path: Path):
                     clean_line = ' '.join(desc.split())
                     if (len(clean_line) > 100 and not any(
                             clean_line.upper().startswith(p) for p in TECH_PREFIXES)):
-                        records.append(clean_line)
+                        records.append(format_description(clean_line))
                         return date, records
     return date, records
 
@@ -159,10 +166,14 @@ def process_documents(input_dir: Path, output_csv: Path, limit: int = 500):
     processed = 0
     row_count = 0
     log_lines: list[str] = []
+    seen_ids: set[str] = set()
 
     for file in files:
         try:
             source_id = normalize_source_id(file.name)
+            if source_id in seen_ids:
+                log_lines.append(f'Skipped duplicate {file.name}')
+                continue
             target = file
             if file.suffix.lower() == '.doc':
                 target = convert_doc_to_docx(file)
@@ -173,6 +184,7 @@ def process_documents(input_dir: Path, output_csv: Path, limit: int = 500):
             row_count += len(descriptions)
             rows = [(source_id, date or '', desc) for desc in descriptions]
             write_csv(output_csv, rows)
+            seen_ids.add(source_id)
             log_lines.append(f'Processed {file.name}')
         except Exception as exc:  # pragma: no cover - execution errors
             log_lines.append(f'{file.name}: {exc}')
