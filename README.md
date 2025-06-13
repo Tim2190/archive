@@ -4,7 +4,8 @@ Utility to extract episode tables from Word documents into a single CSV file.
 
 ## Usage
 
-1. Put all `.doc` and `.docx` files inside a directory.
+1. Create a folder for your source files, for example `input_docs`, and place
+   all `.doc` and `.docx` files there.
 2. Run the extractor specifying that directory:
    
    ```bash
@@ -24,7 +25,8 @@ streamlit run app.py
 
 The interface lets you choose the folder with Word documents, specify the
 output CSV path and the number of files to process, then shows progress and a
-download link.
+download link. By default it looks for `input_docs` and writes to
+`output/result.csv` relative to the project directory.
 
 Dependencies:
 
