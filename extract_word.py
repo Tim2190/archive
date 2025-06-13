@@ -94,7 +94,12 @@ def convert_doc_to_docx(path: Path) -> Path:
 
 
 def parse_docx_tables(path: Path):
-    """Return date string and one meaningful description from tables."""
+    """Return date and list of descriptions from all tables.
+
+    Multi-line text is preserved. Rows that start with empty leading cells are
+    considered a continuation of the previous description and appended with a
+    newline.
+    """
     from docx import Document  # imported here to avoid dependency when unused
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
@@ -106,32 +111,34 @@ def parse_docx_tables(path: Path):
     records: list[str] = []
 
     for element in doc.element.body.iterchildren():
-        if isinstance(element, CT_P):
-            if date is None:
-                paragraph = Paragraph(element, doc)
-                match = DATE_PATTERN.search(paragraph.text)
-                if match:
-                    date = match.group().replace('/', '.')
+        if isinstance(element, CT_P) and date is None:
+            paragraph = Paragraph(element, doc)
+            match = DATE_PATTERN.search(paragraph.text)
+            if match:
+                date = match.group().replace('/', '.')
         elif isinstance(element, CT_Tbl):
             table = Table(element, doc)
-            if not table.rows:
-                continue
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells]
-                desc_parts = []
-                for text in cells:
-                    cleaned = TIME_PATTERN.sub('', text).strip()
+                if not any(cells):
+                    continue
+                cleaned = [TIME_PATTERN.sub('', c) for c in cells]
+                for i in range(len(cleaned)):
                     for junk in JUNK_PHRASES:
-                        cleaned = cleaned.replace(junk, '').strip()
-                    if cleaned and not cleaned.isdigit():
-                        desc_parts.append(cleaned)
+                        cleaned[i] = cleaned[i].replace(junk, '')
+                    cleaned[i] = cleaned[i].strip()
+
+                is_cont = all(not cleaned[i] for i in range(min(3, len(cleaned))))
+                desc_cells = cleaned[3:] if len(cleaned) > 3 else cleaned
+                desc_parts = [c for c in desc_cells if c and not c.isdigit()]
+                if not desc_parts:
+                    continue
                 desc = ' '.join(desc_parts).strip()
-                if desc:
-                    clean_line = ' '.join(desc.split())
-                    if (len(clean_line) > 100 and not any(
-                            clean_line.upper().startswith(p) for p in TECH_PREFIXES)):
-                        records.append(format_description(clean_line))
-                        return date, records
+                if is_cont and records:
+                    records[-1] += "\n" + desc
+                else:
+                    records.append(desc)
+
     return date, records
 
 

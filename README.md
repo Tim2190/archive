@@ -13,12 +13,13 @@ Utility to extract episode tables from Word documents into a single CSV file.
    ```
 
 Each run processes up to 500 files (configurable with `--limit`) and appends
-rows to the CSV. For every document only one meaningful table row longer than
-100 characters is kept. If several files share the same `source_id`, only the
-first one is written to the result. Descriptions are split into sentences on
-separate lines within the cell. The resulting CSV has three columns:
-`source_id`, `date` and `description`. A log file `process.log` lists processed
-files and any errors.
+rows to the CSV. All tables are scanned and every non-empty row becomes a
+record. If a row starts with empty leading cells it is treated as a continuation
+of the previous description and appended to it with a newline. Multi-line text
+inside description cells is preserved. If several files share the same
+`source_id`, only the first one is written to the result. The resulting CSV has
+three columns: `source_id`, `date` and `description`. A log file `process.log`
+lists processed files and any errors.
 
 ### Web interface
 
