@@ -13,9 +13,10 @@ Utility to extract episode tables from Word documents into a single CSV file.
    ```
 
 Each run processes up to 500 files (configurable with `--limit`) and appends
-rows to the CSV. The resulting file has three columns: `source_id`, `date`
-and `description`. A log file `process.log` lists processed files and any
-errors.
+rows to the CSV. For every document only one meaningful table row longer than
+100 characters is kept. The resulting CSV has three columns: `source_id`,
+`date` and `description`. A log file `process.log` lists processed files and
+any errors.
 
 ### Web interface
 

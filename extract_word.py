@@ -15,6 +15,7 @@ TRANSLIT_MAP = {
     'Д': 'D',
     'Ф': 'F',
     'Н': 'H',
+    'В': 'V',
 }
 
 EXCLUDE_WORDS = [
@@ -25,26 +26,47 @@ EXCLUDE_WORDS = [
 ]
 
 JUNK_PHRASES = ['обрыв', 'таймкод сбит']
+TECH_PREFIXES = ['НОМЕР', 'ТАЙМК', 'НАЧАЛ', 'КОНЕЦ', 'TIME']
 
 TIME_PATTERN = re.compile(r'\b\d{1,2}[:.]\d{2}[:.]\d{2}\b')
 DATE_PATTERN = re.compile(r'\b\d{1,2}[./]\d{1,2}[./]\d{4}\b')
 
 
 def normalize_source_id(filename: str) -> str:
+    """Return normalized cassette ID based on filename without regex."""
     name = Path(filename).stem.upper()
     for word in EXCLUDE_WORDS:
-        name = re.sub(word.upper(), '', name)
-    name = name.replace('_', '').replace(' ', '')
+        name = name.replace(word.upper(), ' ')
+
+    name = name.replace('_', ' ')
+    cleaned = ''.join(ch if ch.isalnum() or ch in '- ' else ' ' for ch in name)
+    parts = [p for p in cleaned.split() if p]
+
+    letters = ''
+    digits = ''
+    for part in parts:
+        part_letters = ''.join(c for c in part if c.isalpha())
+        part_digits = ''.join(c for c in part if c.isdigit() or c == '-')
+        if not letters and part_letters:
+            letters = part_letters
+            if part_digits:
+                digits = part_digits
+                break
+        elif letters and not digits and part_digits:
+            digits = part_digits
+            break
+
+    if not letters and parts:
+        first = parts[0]
+        letters = ''.join(c for c in first if c.isalpha())
+        digits = ''.join(c for c in first if c.isdigit() or c == '-')
+
     for cyr, lat in TRANSLIT_MAP.items():
-        name = name.replace(cyr, lat)
-    match = re.match(r'([A-Z]+)(.*)', name)
-    if match:
-        letters, rest = match.groups()
-        rest = rest.lstrip('-')
-        if rest and not rest.startswith('-'):
-            rest = '-' + rest
-        return f"{letters}{rest}"
-    return name
+        letters = letters.replace(cyr, lat)
+
+    letters = letters.strip('-')
+    digits = digits.strip('-')
+    return f"{letters}-{digits}".strip('-')
 
 
 def convert_doc_to_docx(path: Path) -> Path:
@@ -65,7 +87,7 @@ def convert_doc_to_docx(path: Path) -> Path:
 
 
 def parse_docx_tables(path: Path):
-    """Return date string and descriptions from all tables."""
+    """Return date string and one meaningful description from tables."""
     from docx import Document  # imported here to avoid dependency when unused
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
@@ -96,9 +118,13 @@ def parse_docx_tables(path: Path):
                         cleaned = cleaned.replace(junk, '').strip()
                     if cleaned and not cleaned.isdigit():
                         desc_parts.append(cleaned)
-                desc = ' '.join(desc_parts)
+                desc = ' '.join(desc_parts).strip()
                 if desc:
-                    records.append(desc)
+                    clean_line = ' '.join(desc.split())
+                    if (len(clean_line) > 100 and not any(
+                            clean_line.upper().startswith(p) for p in TECH_PREFIXES)):
+                        records.append(clean_line)
+                        return date, records
     return date, records
 
 
