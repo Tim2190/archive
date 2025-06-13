@@ -5,6 +5,7 @@ from pathlib import Path
 
 try:
     import win32com.client  # type: ignore
+    import pythoncom  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     win32com = None
 
@@ -26,6 +27,7 @@ EXCLUDE_WORDS = [
 JUNK_PHRASES = ['обрыв', 'таймкод сбит']
 
 TIME_PATTERN = re.compile(r'\b\d{1,2}[:.]\d{2}[:.]\d{2}\b')
+DATE_PATTERN = re.compile(r'\b\d{1,2}[./]\d{1,2}[./]\d{4}\b')
 
 
 def normalize_source_id(filename: str) -> str:
@@ -48,47 +50,56 @@ def normalize_source_id(filename: str) -> str:
 def convert_doc_to_docx(path: Path) -> Path:
     if win32com is None:
         raise RuntimeError('win32com is required to handle .doc files')
-    word = win32com.client.Dispatch('Word.Application')
-    word.Visible = False
-    doc = word.Documents.Open(str(path))
-    docx_path = str(path) + 'x'
-    doc.SaveAs(docx_path, FileFormat=16)
-    doc.Close()
-    word.Quit()
-    return Path(docx_path)
+    pythoncom.CoInitialize()
+    try:
+        word = win32com.client.Dispatch('Word.Application')
+        word.Visible = False
+        doc = word.Documents.Open(str(path))
+        docx_path = str(path) + 'x'
+        doc.SaveAs(docx_path, FileFormat=16)
+        doc.Close()
+        word.Quit()
+        return Path(docx_path)
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def parse_docx_tables(path: Path):
+    """Return date string and descriptions from all tables."""
     from docx import Document  # imported here to avoid dependency when unused
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     doc = Document(str(path))
-    records = []
-    for table in doc.tables:
-        if not table.rows:
-            continue
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            times = []
-            desc_parts = []
-            for text in cells:
-                found = TIME_PATTERN.findall(text)
-                if found:
-                    times.extend(found)
-                cleaned = TIME_PATTERN.sub('', text).strip()
-                if cleaned and not cleaned.isdigit():
-                    desc_parts.append(cleaned)
-            if not times:
+    date = None
+    records: list[str] = []
+
+    for element in doc.element.body.iterchildren():
+        if isinstance(element, CT_P):
+            if date is None:
+                paragraph = Paragraph(element, doc)
+                match = DATE_PATTERN.search(paragraph.text)
+                if match:
+                    date = match.group().replace('/', '.')
+        elif isinstance(element, CT_Tbl):
+            table = Table(element, doc)
+            if not table.rows:
                 continue
-            if len(times) >= 2:
-                tc = f"{times[0]} – {times[1]}"
-            else:
-                tc = times[0]
-            desc = ' '.join(desc_parts)
-            for junk in JUNK_PHRASES:
-                desc = desc.replace(junk, '').strip()
-            if not desc:
-                continue
-            records.append((tc, desc))
-    return records
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                desc_parts = []
+                for text in cells:
+                    cleaned = TIME_PATTERN.sub('', text).strip()
+                    for junk in JUNK_PHRASES:
+                        cleaned = cleaned.replace(junk, '').strip()
+                    if cleaned and not cleaned.isdigit():
+                        desc_parts.append(cleaned)
+                desc = ' '.join(desc_parts)
+                if desc:
+                    records.append(desc)
+    return date, records
 
 
 def write_csv(path: Path, rows):
@@ -96,13 +107,13 @@ def write_csv(path: Path, rows):
     with open(path, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=';')
         if not exists:
-            writer.writerow(['source_id', 'timecode', 'description'])
+            writer.writerow(['source_id', 'date', 'description'])
         for r in rows:
             writer.writerow(r)
 
 
 def process_documents(input_dir: Path, output_csv: Path, limit: int = 500):
-    """Process Word documents and save episodes to CSV.
+    """Process Word documents and save episode descriptions to CSV.
 
     Parameters
     ----------
@@ -129,12 +140,12 @@ def process_documents(input_dir: Path, output_csv: Path, limit: int = 500):
             target = file
             if file.suffix.lower() == '.doc':
                 target = convert_doc_to_docx(file)
-            rows = parse_docx_tables(target)
-            if not rows:
+            date, descriptions = parse_docx_tables(target)
+            if not descriptions:
                 continue
             processed += 1
-            row_count += len(rows)
-            rows = [(source_id, tc, desc) for tc, desc in rows]
+            row_count += len(descriptions)
+            rows = [(source_id, date or '', desc) for desc in descriptions]
             write_csv(output_csv, rows)
             log_lines.append(f'Processed {file.name}')
         except Exception as exc:  # pragma: no cover - execution errors
