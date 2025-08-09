@@ -1,0 +1,5 @@
+__pycache__/
+result.csv
+process.log
+output/
+logs/
